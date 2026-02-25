@@ -84,9 +84,9 @@ def record_to_history(df):
     a_top5 = df.sort_values(by="추세점수", ascending=False).head(5)
     
     for _, row in p_top5.iterrows():
-        new_records.append({'Date': today, 'Strategy': 'Phoenix', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
+        new_records.append({'Date': today, 'Strategy': '바닥반등', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
     for _, row in a_top5.iterrows():
-        new_records.append({'Date': today, 'Strategy': 'Alpha', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
+        new_records.append({'Date': today, 'Strategy': '상승추세', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
     
     new_df = pd.DataFrame(new_records)
     if os.path.exists(TRACKER_FILE):
@@ -148,7 +148,7 @@ if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
     f_df = df[(df['Volume_USD'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
     
-    t1, t2 = st.tabs(["🔵 Phoenix", "🟣 Alpha"])
+    t1, t2 = st.tabs(["🔵 바닥반등", "🟣 상승추세"])
     with t1:
         st.dataframe(f_df.sort_values(by="반등점수", ascending=False).head(100), use_container_width=True, hide_index=True)
     with t2:
