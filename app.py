@@ -6,7 +6,7 @@ import os
 import time
 from datetime import datetime
 
-# 1. 기본 설정 (깨짐 방지 CSS 및 폰트 설정 모두 삭제)
+# 1. 기본 설정
 st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
 
 SAVE_FILE = "v15_analyzed.pkl"
@@ -41,13 +41,13 @@ def run_full_market_scan():
             last = df.iloc[-1]
             all_results.append({
                 'Ticker': t,
-                'Price': round(float(last['Close']), 2), # 사용자 지침: "현재가" 대신 "Price"
+                'Price': round(float(last['Close']), 2), # 지침 준수: Price
                 'RSI': round(float(last['RSI']), 2) if not pd.isna(last['RSI']) else 50,
                 'MFI': round(float(last['MFI']), 2) if not pd.isna(last['MFI']) else 50,
                 'Vol_Accel': round(float(last['Vol_Accel']), 2) if not pd.isna(last['Vol_Accel']) else 1,
                 'Volume_USD': float(last['Close'] * last['Volume']),
-                '반등점수': 100 - float(last['RSI']),
-                '추세점수': float(last['MFI'] * last['Vol_Accel'])
+                '반등점수': round(100 - float(last['RSI']), 1),
+                '추세점수': round(float(last['MFI'] * last['Vol_Accel']), 1)
             })
             if i % 20 == 0:
                 status_text.text(f"📦 분석 중: {t} ({i}/{total_count})")
@@ -126,16 +126,24 @@ if selected_date != "선택 안 함":
         st.table(target_picks)
     st.markdown("---")
 
-# 실시간 성적표 표시
+# 실시간 성적표 표시 (탭별 컬럼 분리 적용)
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
     f_df = df[(df['Volume_USD'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
     
     t1, t2 = st.tabs(["🔵 바닥반등", "🟣 상승추세"])
+    
+    # 공통 컬럼: Ticker, Price, Volume_USD, Vol_Accel
     with t1:
-        st.dataframe(f_df.sort_values(by="반등점수", ascending=False).head(100), use_container_width=True, hide_index=True)
+        # 바닥반등: 반등점수만 표시
+        p_df = f_df.sort_values(by="반등점수", ascending=False).head(100)
+        st.dataframe(p_df[['Ticker', 'Price', 'Volume_USD', 'Vol_Accel', '반등점수']], 
+                     use_container_width=True, hide_index=True)
     with t2:
-        st.dataframe(f_df.sort_values(by="추세점수", ascending=False).head(100), use_container_width=True, hide_index=True)
+        # 상승추세: 추세점수만 표시
+        a_df = f_df.sort_values(by="추세점수", ascending=False).head(100)
+        st.dataframe(a_df[['Ticker', 'Price', 'Volume_USD', 'Vol_Accel', '추세점수']], 
+                     use_container_width=True, hide_index=True)
     
     if st.button("💾 이 리스트를 오늘의 TOP으로 저장"):
         record_to_history(df)
