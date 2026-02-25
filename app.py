@@ -82,7 +82,7 @@ def record_to_history(df):
     st.toast(f"✅ {today} 상위 종목 기록 완료!")
 
 # --- UI 레이아웃 시작 ---
-st.title("💵 V15 PRO LEADER BOARD")
+st.title("V15 PRO LEADER BOARD")
 
 # 사이드바 1: 필터 설정
 st.sidebar.header("🎛️ 오늘의 전광판 필터")
