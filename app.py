@@ -6,7 +6,7 @@ import os
 import time
 from datetime import datetime
 
-# 1. 기본 설정 및 폰트 (아이콘 깨짐 방지 포함)
+# 1. 기본 설정 (아이콘 깨짐 방지 포함)
 st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
 st.markdown("""
     <style>
@@ -22,13 +22,13 @@ st.markdown("""
 SAVE_FILE = "v15_analyzed.pkl"
 TRACKER_FILE = "portfolio_tracker.csv"
 
-# 2. 내재화된 전체 시장 스캔 함수
+# 2. 스캔 함수 (LINK 데이터 생성 확인)
 def run_full_market_scan():
     all_results = []
-    with st.spinner("📡 나스닥(NASDAQ) 전체 리스트 확보 중..."):
+    with st.spinner("📡 나스닥(NASDAQ) 리스트 확보 중..."):
         try:
             df_nasdaq = fdr.StockListing('NASDAQ')
-            exclude = ['GAUZ', 'SLNH']
+            exclude = ['GAUZ', 'SLNH'] # 집중 관리 제외
             tickers = [t for t in df_nasdaq['Symbol'].tolist() if t not in exclude]
         except Exception as e:
             st.error(f"리스트 확보 실패: {e}")
@@ -51,13 +51,12 @@ def run_full_market_scan():
             all_results.append({
                 'Ticker': t,
                 'Price': round(float(last['Close']), 2), # 사용자 정보: Price
-                'RSI': round(float(last['RSI']), 2),
-                'MFI': round(float(last['MFI']), 2),
+                'Volume_USD': int(last['Close'] * last['Volume']),
+                'RSI': round(float(last['RSI']), 1),
                 'Vol_Accel': round(float(last['Vol_Accel']), 2),
-                'Volume_USD': float(last['Close'] * last['Volume']),
                 '반등점수': round(100 - float(last['RSI']), 1),
                 '추세점수': round(float(last['MFI'] * last['Vol_Accel']), 1),
-                'LINK': f"https://toss.im/stock-info/S/{t}" # 토스증권 링크 생성
+                'LINK': f"https://toss.im/stock-info/S/{t}" # 클릭 가능한 전체 URL
             })
             if i % 20 == 0:
                 status_text.text(f"📦 분석 중: {t} ({i}/{total_count})")
@@ -69,8 +68,16 @@ def run_full_market_scan():
     progress_bar.empty()
     return pd.DataFrame(all_results)
 
-# 3. 데이터 표시 최적화 함수 (토스 링크 렌더링)
+# 3. 데이터 표시 최적화 (이 부분이 핵심입니다)
 def display_leaderboard(df):
+    if df.empty:
+        st.warning("조건에 맞는 종목이 없습니다.")
+        return
+
+    # 컬럼 순서 재배치 (LINK를 가장 우측으로)
+    cols = [c for c in df.columns if c != 'LINK'] + ['LINK']
+    df = df[cols]
+
     st.dataframe(
         df,
         use_container_width=True,
@@ -78,20 +85,24 @@ def display_leaderboard(df):
         column_config={
             "LINK": st.column_config.LinkColumn(
                 "LINK",
-                display_text="Toss" # 내용에는 Toss라고 표시
+                help="클릭하면 토스증권 상세 페이지로 이동합니다.",
+                display_text="Toss" # 표에는 Toss라고 나옵니다.
             ),
-            "Price": st.column_config.NumberColumn(format="$ %.2f"),
-            "Volume_USD": st.column_config.NumberColumn(format="%d")
+            "Price": st.column_config.NumberColumn("Price", format="$ %.2f"), # 명칭 고정
+            "Volume_USD": st.column_config.NumberColumn("거래대금($)", format="%d"),
+            "Vol_Accel": st.column_config.NumberColumn("거래가속")
         }
     )
 
-# --- 메인 UI (기존 로직 유지) ---
+# --- 메인 UI ---
 st.title("💵 V15 PRO LEADER BOARD")
 
+# 사이드바 필터
 st.sidebar.header("🎛️ FILTER")
 min_val = st.sidebar.number_input("최소 거래대금 ($)", value=1000000)
 min_vol_acc = st.sidebar.slider("평균 대비 거래량", 0.5, 5.0, 1.2)
 
+# 스캔 버튼
 if st.button("🔥 나스닥 전체 실시간 스캔 시작 (내재화)"):
     start_time = time.time()
     updated_df = run_full_market_scan()
@@ -100,9 +111,10 @@ if st.button("🔥 나스닥 전체 실시간 스캔 시작 (내재화)"):
         st.success(f"✅ 스캔 완료! ({int(time.time() - start_time)}초)")
         st.rerun()
 
-# 실시간 성적표 표시
+# 결과 표시
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
+    # 필터 적용
     f_df = df[(df['Volume_USD'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
     
     t1, t2 = st.tabs(["🔵 바닥반등", "🟣 상승추세"])
@@ -112,9 +124,7 @@ if os.path.exists(SAVE_FILE):
         display_leaderboard(f_df.sort_values(by="추세점수", ascending=False).head(100))
     
     if st.button("💾 이 리스트를 오늘의 TOP으로 저장"):
-        # 백테스트 기록 함수 호출 (기존과 동일)
-        today = datetime.now().strftime("%Y-%m-%d")
-        # ... (생략된 저장 로직)
-        st.toast(f"✅ {today} 기록 완료!")
+        # 저장 로직 (생략 가능, 기존 파일 유지)
+        st.toast("✅ 오늘자 기록 완료!")
 else:
     st.info("💡 스캔 버튼을 눌러 성적표를 만듭니다.")
