@@ -99,12 +99,12 @@ def record_to_history(df):
     st.toast(f"✅ {today} 상위 종목 기록 완료!")
 
 # --- 메인 UI ---
-st.title("🛡️ V15 PRO - 통합 시스템")
+st.title("💵 V15 PRO LEADER BOARD")
 
 # 사이드바
-st.sidebar.header("🎛️ 리더보드 필터")
+st.sidebar.header("🎛️ FILTER")
 min_val = st.sidebar.number_input("최소 거래대금 ($)", value=1000000)
-min_vol_acc = st.sidebar.slider("최소 거래 가속도", 0.5, 5.0, 1.2)
+min_vol_acc = st.sidebar.slider("평균 대비 거래량", 0.5, 5.0, 1.2)
 
 st.sidebar.markdown("---")
 st.sidebar.header("📂 과거 기록 (백테스트)")
