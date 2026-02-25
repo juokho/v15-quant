@@ -81,7 +81,7 @@ def record_to_history(df):
     st.toast(f"✅ {today} 상위 종목 기록 완료!")
 
 # --- UI 레이아웃 ---
-st.title("🛡️ V15 PRO - 전광판 & 백테스트 통합 시스템")
+st.title("💵 V15 PRO - 전광판 & 백테스트 통합 시스템")
 
 # 사이드바 필터 및 기록 관리
 st.sidebar.header("🎛️ 오늘의 전광판 필터")
