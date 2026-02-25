@@ -39,7 +39,7 @@ def run_realtime_scan(ticker_list):
             last = df.iloc[-1]
             all_results.append({
                 'Ticker': t,
-                '현재가': round(last['Close'], 2),
+                'Price': round(last['Close'], 2),
                 'RSI': round(last['RSI'], 2),
                 'MFI': round(last['MFI'], 2),
                 'Vol_Accel': round(last['Vol_Accel'], 2),
@@ -65,9 +65,9 @@ def record_to_history(df):
     a_top5 = df.sort_values(by="추세점수", ascending=False).head(5)
     
     for _, row in p_top5.iterrows():
-        new_records.append({'Date': today, 'Strategy': 'Phoenix', 'Ticker': row['Ticker'], 'Buy_Price': row['현재가']})
+        new_records.append({'Date': today, 'Strategy': 'Phoenix', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
     for _, row in a_top5.iterrows():
-        new_records.append({'Date': today, 'Strategy': 'Alpha', 'Ticker': row['Ticker'], 'Buy_Price': row['현재가']})
+        new_records.append({'Date': today, 'Strategy': 'Alpha', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
     
     new_df = pd.DataFrame(new_records)
     if os.path.exists(TRACKER_FILE):
@@ -125,9 +125,9 @@ if selected_date != "선택 안 함":
                     current_prices[t] = curr
                 except: current_prices[t] = 0
             
-            target_picks['현재가'] = target_picks['Ticker'].map(current_prices)
-            target_picks['수익률(%)'] = ((target_picks['현재가'] - target_picks['Buy_Price']) / target_picks['Buy_Price'] * 100).round(2)
-            st.table(target_picks[['Strategy', 'Ticker', 'Buy_Price', '현재가', '수익률(%)']])
+            target_picks['Price'] = target_picks['Ticker'].map(current_prices)
+            target_picks['수익률(%)'] = ((target_picks['Price'] - target_picks['Buy_Price']) / target_picks['Buy_Price'] * 100).round(2)
+            st.table(target_picks[['Strategy', 'Ticker', 'Buy_Price', 'Price', '수익률(%)']])
     else:
         st.table(target_picks)
     st.markdown("---")
