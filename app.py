@@ -42,9 +42,9 @@ def record_top_picks(df):
     
     # 상위 종목 기록
     for _, row in phoenix_top5.iterrows():
-        new_records.append({'Date': today, 'Strategy': 'Phoenix', 'Ticker': row['Ticker'], 'Buy_Price': row['price']})
+        new_records.append({'Date': today, 'Strategy': 'Phoenix', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
     for _, row in alpha_top5.iterrows():
-        new_records.append({'Date': today, 'Strategy': 'Alpha', 'Ticker': row['Ticker'], 'Buy_Price': row['price']})
+        new_records.append({'Date': today, 'Strategy': 'Alpha', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
         
     # 집중 관리 종목 (GAUZ, SLNH) 강제 추가
     for focus_ticker in ['GAUZ.KS', 'SLNH.KS']: # 실제 티커명으로 수정 필요
