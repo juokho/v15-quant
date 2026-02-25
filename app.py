@@ -10,9 +10,9 @@ from datetime import datetime
 st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
 
 SAVE_FILE = "v15_analyzed.pkl"
-TRACKER_FILE = "portfolio_tracker.csv" # 백테스트 저장 파일
+TRACKER_FILE = "portfolio_tracker.csv"
 
-# 2. 전체 시장 스캔 함수 (블랙리스트 삭제)
+# 2. 전체 시장 스캔 함수 (블랙리스트/특정 종목 언급 없음)
 def run_full_market_scan():
     all_results = []
     with st.spinner("📡 나스닥(NASDAQ) 전 종목 분석 중..."):
@@ -58,7 +58,6 @@ def record_to_history(df):
     today = datetime.now().strftime("%Y-%m-%d")
     new_records = []
     
-    # 각 전략별 TOP 5 추출
     p_top5 = df.sort_values(by="반등점수", ascending=False).head(5)
     a_top5 = df.sort_values(by="추세점수", ascending=False).head(5)
     
@@ -70,14 +69,14 @@ def record_to_history(df):
     new_df = pd.DataFrame(new_records)
     if os.path.exists(TRACKER_FILE):
         old_df = pd.read_csv(TRACKER_FILE)
-        old_df = old_df[old_df['Date'] != today] # 중복 방지
+        old_df = old_df[old_df['Date'] != today]
         final_df = pd.concat([old_df, new_df], ignore_index=True)
     else:
         final_df = new_df
     final_df.to_csv(TRACKER_FILE, index=False)
     st.toast(f"✅ {today} 상위 종목 기록 완료!")
 
-# 4. 리더보드 출력 함수 (문자열 포맷팅 적용)
+# 4. 리더보드 출력 함수 ($ 및 콤마 강제 적용)
 def display_formatted_df(df, score_col):
     if df.empty:
         st.warning("🧐 조건에 맞는 종목이 없습니다.")
@@ -105,7 +104,6 @@ def display_formatted_df(df, score_col):
 # --- 메인 UI ---
 st.title("💵 V15 PRO LEADER BOARD")
 
-# 사이드바 설정
 st.sidebar.header("🎛️ FILTER")
 min_val = st.sidebar.number_input("최소 거래대금 ($)", value=1000000)
 min_vol_acc = st.sidebar.slider("평균 대비 거래량", 0.5, 5.0, 1.2)
@@ -119,41 +117,46 @@ if os.path.exists(TRACKER_FILE):
 else:
     selected_date = "선택 안 함"
 
-# 스캔 버튼
-if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V3.5)"):
+if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V3.6)"):
     updated_df = run_full_market_scan()
     if not updated_df.empty:
         updated_df.to_pickle(SAVE_FILE)
         st.success("✅ 스캔 완료!")
         st.rerun()
 
-# 백테스트 섹션 표시
+# 백테스트 섹션
 if selected_date != "선택 안 함":
-    st.subheader(f"📅 {selected_date} Pick & 수익률 추적")
+    st.subheader(f"📅 {selected_date} Pick 수익률 추적")
     target_picks = hist_df[hist_df['Date'] == selected_date].copy()
-    
     if st.button("📈 실시간 수익률 확인"):
-        with st.spinner("현재가 조회 중..."):
-            for idx, row in target_picks.iterrows():
-                try:
-                    curr_price = fdr.DataReader(row['Ticker']).iloc[-1]['Close']
-                    target_picks.at[idx, 'Price'] = round(float(curr_price), 2)
-                except: target_picks.at[idx, 'Price'] = 0
-            
-            target_picks['수익률(%)'] = ((target_picks['Price'] - target_picks['Buy_Price']) / target_picks['Buy_Price'] * 100).round(2)
-            st.table(target_picks[['Strategy', 'Ticker', 'Buy_Price', 'Price', '수익률(%)']])
+        for idx, row in target_picks.iterrows():
+            try:
+                curr_price = fdr.DataReader(row['Ticker']).iloc[-1]['Close']
+                target_picks.at[idx, 'Price'] = float(curr_price)
+            except: target_picks.at[idx, 'Price'] = 0
+        target_picks['수익률(%)'] = ((target_picks['Price'] - target_picks['Buy_Price']) / target_picks['Buy_Price'] * 100).round(2)
+        st.table(target_picks[['Strategy', 'Ticker', 'Buy_Price', 'Price', '수익률(%)']])
     else:
         st.table(target_picks)
-    st.markdown("---")
 
-# 실시간 결과 표시
+# 메인 결과 표시 (KeyError 방어 로직 강화)
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
     
-    # 이전 데이터 호환
-    if 'Price_Val' not in df.columns: df['Price_Val'] = df['Price']
-    if '거래대금_Val' not in df.columns: df['거래대금_Val'] = df['거래대금']
+    # [안전 패치] 어떤 컬럼명이든 필터링용 규격으로 강제 변환
+    if 'Price_Val' not in df.columns:
+        df['Price_Val'] = df['Price'] if 'Price' in df.columns else 0.0
     
+    if '거래대금_Val' not in df.columns:
+        # '거래대금'이 없으면 'Volume_USD'를 찾고, 그것도 없으면 0으로 처리
+        if '거래대금' in df.columns:
+            df['거래대금_Val'] = df['거래대금']
+        elif 'Volume_USD' in df.columns:
+            df['거래대금_Val'] = df['Volume_USD']
+        else:
+            df['거래대금_Val'] = 0
+
+    # 필터 적용
     f_df = df[(df['거래대금_Val'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
     
     t1, t2 = st.tabs(["🔵 바닥반등", "🟣 상승추세"])
@@ -167,4 +170,4 @@ if os.path.exists(SAVE_FILE):
     if st.button("💾 이 리스트를 오늘의 TOP으로 저장"):
         record_to_history(df)
 else:
-    st.info("💡 스캔 버튼을 눌러 리더보드를 만드세요.")
+    st.info("💡 스캔 버튼을 눌러 리더보드를 생성하세요.")
