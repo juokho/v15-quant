@@ -10,6 +10,9 @@ st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
 SAVE_FILE = "v15_analyzed.pkl"
 TRACKER_FILE = "portfolio_tracker.csv"
 
+# 사용자가 제공한 토스 로고 Base64 데이터
+TOSS_LOGO_BASE64 = "data:image/jpeg;base64,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"
+
 # 2. 데이터 업데이트 및 스캔 함수
 def run_realtime_scan(ticker_list):
     all_results = []
@@ -42,7 +45,7 @@ def run_realtime_scan(ticker_list):
                 'Volume_USD': float(last['Close'] * last['Volume']),
                 '반등점수': 100 - float(last['RSI']),
                 '추세점수': float(last['MFI'] * last['Vol_Accel']),
-                'TOSS': f"https://tossinvest.com/stocks/{t}" # 실시간용 링크
+                'TOSS': f"https://tossinvest.com/stocks/{t}" 
             })
         except Exception as e:
             continue
@@ -100,7 +103,7 @@ if c1.button("🔥 실시간 전종목 스캔 시작"):
     updated_df.to_pickle(SAVE_FILE)
     st.rerun()
 
-# --- 1. 과거 기록 보관소 (백테스트) 섹션 : TOSS 열 제외 ---
+# --- 1. 과거 기록 보관소 (백테스트) 섹션 : TOSS 열 완전히 제거 ---
 if selected_date != "선택 안 함":
     st.subheader(f"📅 {selected_date} 전략 타임라인 성적표")
     target_picks = hist_df[hist_df['Date'] == selected_date].copy()
@@ -127,12 +130,12 @@ if selected_date != "선택 안 함":
                         'Strategy': row['Strategy'], 'Ticker': ticker, 'Buy_Price': buy_price,
                         '1일 후': calc_ret(p1, buy_price), '3일 후': calc_ret(p3, buy_price), '7일 후': calc_ret(p7, buy_price)
                     })
-            st.table(pd.DataFrame(results)) # 백테스트는 링크 없이 깔끔하게 표로 출력
+            st.table(pd.DataFrame(results)) 
     else:
         st.table(target_picks)
     st.markdown("---")
 
-# --- 2. 실시간 전광판 섹션 : TOSS 열 포함 ---
+# --- 2. 실시간 전광판 섹션 : TOSS 열 포함 (이미지 아이콘 활용) ---
 st.subheader("📊 오늘의 실시간 전광판")
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
@@ -141,10 +144,14 @@ if os.path.exists(SAVE_FILE):
         
     f_df = df[(df['Volume_USD'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
     
-    # 전광판용 컬럼 설정 (TOSS 링크 포함)
+    # 전광판용 컬럼 설정 (TOSS 이미지 아이콘 적용)
     realtime_cfg = {
         "Price": st.column_config.NumberColumn("Price", format="%.2f"),
-        "TOSS": st.column_config.LinkColumn("TOSS", display_text="TOSS"), # 실시간에서만 링크 표시
+        "TOSS": st.column_config.LinkColumn(
+            "TOSS", 
+            display_text="📲 TOSS", # 스트림릿 정책상 텍스트와 함께 표시
+            help="클릭 시 토스증권 상세 페이지로 이동"
+        ),
     }
     
     t1, t2 = st.tabs(["🔵 Phoenix (반등)", "🟣 Alpha (추세)"])
