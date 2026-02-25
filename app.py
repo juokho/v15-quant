@@ -1,118 +1,150 @@
 import streamlit as st
 import pandas as pd
+import pandas_ta as ta
 import yfinance as yf
 import os
 from datetime import datetime
 
+# 1. 기본 설정
 st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
 SAVE_FILE = "v15_analyzed.pkl"
-TRACKER_FILE = "portfolio_tracker.csv" # 백테스트 기록용 파일
+TRACKER_FILE = "portfolio_tracker.csv"
+FOCUS_TICKERS = ["GAUZ", "SLNH"] # 사용자 집중 관리 종목 (티커만 입력)
 
-# ---------------------------------------------------------
-# 1. 데이터 업데이트 함수 (여기에 기존 Colab 코드를 이식해야 합니다)
-# ---------------------------------------------------------
-def run_data_update():
-    st.info("데이터 수집 및 분석을 시작합니다. (시간이 소요될 수 있습니다...)")
-    # TODO: 여기에 기존 코랩에서 쓰시던 yfinance 다운로드 및 pandas-ta 계산 코드를 넣으세요.
-    # 예시:
-    # df = fetch_and_analyze_data()
-    # df.to_pickle(SAVE_FILE)
-    st.success("데이터 업데이트가 완료되었습니다! 페이지를 새로고침 해주세요.")
-
-# ---------------------------------------------------------
-# 2. 상위 종목 기록 함수 (오늘의 Top 5 저장)
-# ---------------------------------------------------------
-def record_top_picks(df):
-    today = datetime.now().strftime("%Y-%m-%d")
+# 2. 데이터 업데이트 및 스캔 함수 (내재화)
+def run_realtime_scan(ticker_list):
+    all_results = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
-    # 이미 오늘 기록을 남겼는지 확인
-    if os.path.exists(TRACKER_FILE):
-        history_df = pd.read_csv(TRACKER_FILE)
-        if today in history_df['Date'].values:
-            st.toast("오늘의 종목이 이미 기록되어 있습니다.")
-            return history_df
-    else:
-        history_df = pd.DataFrame(columns=['Date', 'Strategy', 'Ticker', 'Buy_Price'])
+    for i, t in enumerate(ticker_list):
+        try:
+            # 한국/미국 티커 구분 처리 (단순화)
+            full_ticker = f"{t}.KS" if t in ["005930", "GAUZ", "SLNH"] else t # 필요시 로직 확장
+            status_text.text(f"🔍 스캔 중: {full_ticker} ({i+1}/{len(ticker_list)})")
+            
+            df = yf.download(full_ticker, period="1y", interval="1d", progress=False)
+            if len(df) < 20: continue
 
-    # 반등(Phoenix) 및 추세(Alpha) 상위 5개 추출
-    phoenix_top5 = df.sort_values(by="반등점수", ascending=False).head(5)
-    alpha_top5 = df.sort_values(by="추세점수", ascending=False).head(5)
+            # 지표 계산
+            df['RSI'] = ta.rsi(df['Close'], length=14)
+            df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
+            
+            # V15 핵심 지표 (가상 예시)
+            avg_vol = df['Volume'].rolling(20).mean()
+            df['Vol_Accel'] = df['Volume'] / avg_vol
+            df['Avg_Range'] = (abs(df['High'] - df['Low']) / df['Close'] * 100).rolling(20).mean()
+            
+            # 점수 계산 (사용자 전략 반영)
+            last = df.iloc[-1]
+            all_results.append({
+                'Ticker': t,
+                '현재가': round(last['Close'], 2),
+                'RSI': round(last['RSI'], 2),
+                'MFI': round(last['MFI'], 2),
+                'Vol_Accel': round(last['Vol_Accel'], 2),
+                'Avg_Range': round(last['Avg_Range'], 2),
+                'Volume_USD': last['Close'] * last['Volume'], # 대략적 거래대금
+                '반등점수': 100 - last['RSI'], # 예시 로직
+                '추세점수': last['MFI'] * last['Vol_Accel'] # 예시 로직
+            })
+        except Exception as e:
+            continue
+        progress_bar.progress((i + 1) / len(ticker_list))
+    
+    status_text.empty()
+    return pd.DataFrame(all_results)
 
+# 3. 기록 저장 함수
+def record_to_history(df):
+    today = datetime.now().strftime("%Y-%m-%d")
     new_records = []
     
-    # 상위 종목 기록
-    for _, row in phoenix_top5.iterrows():
-        new_records.append({'Date': today, 'Strategy': 'Phoenix', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
-    for _, row in alpha_top5.iterrows():
-        new_records.append({'Date': today, 'Strategy': 'Alpha', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
-        
-    # 집중 관리 종목 (GAUZ, SLNH) 강제 추가
-    for focus_ticker in ['GAUZ.KS', 'SLNH.KS']: # 실제 티커명으로 수정 필요
-        if focus_ticker in df['Ticker'].values:
-            price = df[df['Ticker'] == focus_ticker]['현재가'].values[0]
-            new_records.append({'Date': today, 'Strategy': 'Focus Management', 'Ticker': focus_ticker, 'Buy_Price': price})
-
+    # Phoenix/Alpha 상위 5개씩 추출
+    p_top5 = df.sort_values(by="반등점수", ascending=False).head(5)
+    a_top5 = df.sort_values(by="추세점수", ascending=False).head(5)
+    
+    for _, row in p_top5.iterrows():
+        new_records.append({'Date': today, 'Strategy': 'Phoenix', 'Ticker': row['Ticker'], 'Buy_Price': row['현재가']})
+    for _, row in a_top5.iterrows():
+        new_records.append({'Date': today, 'Strategy': 'Alpha', 'Ticker': row['Ticker'], 'Buy_Price': row['현재가']})
+    
     new_df = pd.DataFrame(new_records)
-    history_df = pd.concat([history_df, new_df], ignore_index=True)
-    history_df.to_csv(TRACKER_FILE, index=False)
-    st.toast("오늘의 포트폴리오가 기록되었습니다!")
-    return history_df
+    if os.path.exists(TRACKER_FILE):
+        old_df = pd.read_csv(TRACKER_FILE)
+        # 오늘 이미 기록했다면 삭제 후 업데이트
+        old_df = old_df[old_df['Date'] != today]
+        final_df = pd.concat([old_df, new_df], ignore_index=True)
+    else:
+        final_df = new_df
+    
+    final_df.to_csv(TRACKER_FILE, index=False)
+    st.toast(f"✅ {today} 상위 종목 기록 완료!")
 
-# ---------------------------------------------------------
-# 화면 UI 구성
-# ---------------------------------------------------------
-st.title("🛡️ V15 PRO - 전문가용 필터 & 백테스트 대시보드")
+# --- UI 레이아웃 시작 ---
+st.title("🛡️ V15 PRO - 전광판 & 백테스트 통합 시스템")
 
-# 수동 업데이트 버튼
-col1, col2 = st.columns([8, 2])
-with col2:
-    if st.button("🔄 최신 데이터 스캔 및 업데이트"):
-        run_data_update()
+# 사이드바 1: 필터 설정
+st.sidebar.header("🎛️ 오늘의 전광판 필터")
+min_val = st.sidebar.number_input("최소 거래대금 ($)", value=1000000)
+min_vol_acc = st.sidebar.slider("최소 거래 가속도", 0.5, 5.0, 1.0)
 
+# 사이드바 2: 과거 기록 보관소 (블로그 탭 스타일)
+st.sidebar.markdown("---")
+st.sidebar.header("📂 과거 기록 보관소")
+if os.path.exists(TRACKER_FILE):
+    hist_df = pd.read_csv(TRACKER_FILE)
+    available_dates = sorted(hist_df['Date'].unique(), reverse=True)
+    selected_date = st.sidebar.selectbox("📅 날짜 선택", ["선택 안 함"] + available_dates)
+else:
+    selected_date = "선택 안 함"
+
+# 메인 기능 버튼
+c1, c2 = st.columns(2)
+with c1:
+    if st.button("🔥 실시간 전종목 스캔 시작"):
+        # 실제로는 전종목 리스트를 넣으세요. 우선은 예시 티커들입니다.
+        sample_list = ["AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "GAUZ", "SLNH", "005930"]
+        updated_df = run_realtime_scan(sample_list)
+        updated_df.to_pickle(SAVE_FILE)
+        st.rerun()
+
+# --- 데이터 표시 구역 ---
+if selected_date != "선택 안 함":
+    # 탭 메뉴처럼 과거 기록을 상단에 노출
+    st.subheader(f"📅 {selected_date} 기록 및 수익률 추적")
+    target_picks = hist_df[hist_df['Date'] == selected_date].copy()
+    
+    if st.button("📈 현재 수익률 계산하기"):
+        with st.spinner("실시간 가격 조회 중..."):
+            current_prices = {}
+            for t in target_picks['Ticker'].unique():
+                try:
+                    # 과거 기록 티커에 맞춰 처리 필요 (미국주식 기준 예시)
+                    curr = yf.download(t, period="1d", progress=False)['Close'].iloc[-1]
+                    current_prices[t] = curr
+                except: current_prices[t] = 0
+            
+            target_picks['현재가'] = target_picks['Ticker'].map(current_prices)
+            target_picks['수익률(%)'] = ((target_picks['현재가'] - target_picks['Buy_Price']) / target_picks['Buy_Price'] * 100).round(2)
+            st.table(target_picks[['Strategy', 'Ticker', 'Buy_Price', '현재가', '수익률(%)']])
+    else:
+        st.table(target_picks)
+    st.markdown("---")
+
+# 오늘의 전광판 (필터 적용 결과)
+st.subheader("📊 오늘의 실시간 전광판")
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
+    f_df = df[(df['Volume_USD'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
     
-    st.sidebar.header("🎛️ 고도화 필터")
-    min_val = st.sidebar.number_input("최소 거래대금 ($)", value=5000000)
-    min_vol_acc = st.sidebar.slider("최소 거래 가속도 (1.0 = 평소수준)", 0.5, 5.0, 1.2)
-    min_range = st.sidebar.slider("최소 평균 변동폭 (%)", 1.0, 10.0, 2.0)
+    t1, t2 = st.tabs(["🔵 Phoenix (반등)", "🟣 Alpha (추세)"])
+    with t1:
+        st.dataframe(f_df.sort_values(by="반등점수", ascending=False).head(50), use_container_width=True)
+    with t2:
+        st.dataframe(f_df.sort_values(by="추세점수", ascending=False).head(50), use_container_width=True)
     
-    # 필터 적용 로직
-    f_df = df[
-        (df['Volume_USD'] >= min_val) & 
-        (df['Vol_Accel'] >= min_vol_acc) & 
-        (df['Avg_Range'] >= min_range)
-    ].copy()
-    
-    f_df['TOSS'] = f_df['Ticker'].apply(lambda x: f"https://tossinvest.com/stocks/{x}")
-
-    if not f_df.empty:
-        # 탭 3개로 확장: 반등, 추세, 백테스트
-        t1, t2, t3 = st.tabs(["🔵 Phoenix (반등)", "🟣 Alpha (추세)", "📈 백테스트 (수익률 추적)"])
-        cfg = {
-            "Vol_Accel": st.column_config.NumberColumn("거래가속", format="%.1fx"),
-            "Avg_Range": st.column_config.NumberColumn("평균변동", format="%.1f%%"),
-            "Volume_USD": st.column_config.NumberColumn("거래대금($)", format="%d"),
-            "TOSS": st.column_config.LinkColumn("GO", display_text="LINK")
-        }
-        
-        with t1: 
-            st.dataframe(f_df.sort_values(by="반등점수", ascending=False).head(50), column_config=cfg, hide_index=True)
-        with t2: 
-            st.dataframe(f_df.sort_values(by="추세점수", ascending=False).head(50), column_config=cfg, hide_index=True)
-            
-        with t3:
-            st.subheader("📊 누적 수익률 추적")
-            if st.button("💾 오늘의 상위 5종목 기록하기"):
-                record_top_picks(df)
-            
-            if os.path.exists(TRACKER_FILE):
-                history_df = pd.read_csv(TRACKER_FILE)
-                st.write("과거 추천 종목 리스트 (향후 현재가 연동 업데이트 예정):")
-                st.dataframe(history_df, hide_index=True)
-            else:
-                st.info("아직 기록된 백테스트 데이터가 없습니다.")
-    else:
-        st.warning("조건을 만족하는 종목이 없습니다. 필터를 완화해 보세요.")
+    if st.button("💾 이 리스트를 오늘의 TOP으로 저장"):
+        record_to_history(df)
 else:
-    st.error(f"{SAVE_FILE} 파일이 없습니다. 업데이트 버튼을 눌러 데이터를 생성하세요.")
+    st.info("스캔 시작 버튼을 눌러 데이터를 생성하세요.")
