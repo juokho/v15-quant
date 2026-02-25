@@ -1,5 +1,5 @@
 streamlit
 pandas
-pandas_ta
-FinanceDataReader
+pandas-ta
+finance-datareader
 yfinance
