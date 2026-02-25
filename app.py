@@ -6,15 +6,23 @@ import os
 import time
 from datetime import datetime
 
-# 1. 기본 설정 (아이콘 깨짐 방지 포함)
+# 1. 기본 설정 및 아이콘 깨짐 방지 패치
 st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
+
 st.markdown("""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-    html, body, [class*="css"] { font-family: 'Pretendard' !important; }
-    .st-emotion-cache-17l6l7d, .material-icons, [data-testid="stSidebarCollapseButton"] span {
+    
+    /* 전체 폰트 적용 (아이콘 제외) */
+    html, body, [class*="css"] {
+        font-family: 'Pretendard', -apple-system, sans-serif !important;
+    }
+
+    /* Streamlit 시스템 아이콘 폰트 강제 보존 (화살표 깨짐 방지) */
+    .st-emotion-cache-17l6l7d, .material-icons, [data-testid="stSidebarCollapseButton"] span, .st-emotion-cache-6q9sum {
         font-family: 'Material Icons' !important;
     }
+
     h1 { font-weight: 800 !important; letter-spacing: -1px; }
     </style>
 """, unsafe_allow_html=True)
@@ -22,13 +30,14 @@ st.markdown("""
 SAVE_FILE = "v15_analyzed.pkl"
 TRACKER_FILE = "portfolio_tracker.csv"
 
-# 2. 스캔 함수 (LINK 데이터 생성 확인)
+# 2. 내재화된 전체 시장 스캔 함수 (V2 로직)
 def run_full_market_scan():
     all_results = []
-    with st.spinner("📡 나스닥(NASDAQ) 리스트 확보 중..."):
+    with st.spinner("📡 나스닥(NASDAQ) 전체 리스트 확보 중..."):
         try:
             df_nasdaq = fdr.StockListing('NASDAQ')
-            exclude = ['GAUZ', 'SLNH'] # 집중 관리 제외
+            # 사용자 지정 제외 종목
+            exclude = ['GAUZ', 'SLNH']
             tickers = [t for t in df_nasdaq['Symbol'].tolist() if t not in exclude]
         except Exception as e:
             st.error(f"리스트 확보 실패: {e}")
@@ -50,13 +59,13 @@ def run_full_market_scan():
             last = df.iloc[-1]
             all_results.append({
                 'Ticker': t,
-                'Price': round(float(last['Close']), 2), # 사용자 정보: Price
+                'Price': round(float(last['Close']), 2), # 지침 준수: Price
                 'Volume_USD': int(last['Close'] * last['Volume']),
                 'RSI': round(float(last['RSI']), 1),
                 'Vol_Accel': round(float(last['Vol_Accel']), 2),
                 '반등점수': round(100 - float(last['RSI']), 1),
                 '추세점수': round(float(last['MFI'] * last['Vol_Accel']), 1),
-                'LINK': f"https://toss.im/stock-info/S/{t}" # 클릭 가능한 전체 URL
+                'LINK': f"https://toss.im/stock-info/S/{t}" # 토스증권 링크
             })
             if i % 20 == 0:
                 status_text.text(f"📦 분석 중: {t} ({i}/{total_count})")
@@ -68,13 +77,13 @@ def run_full_market_scan():
     progress_bar.empty()
     return pd.DataFrame(all_results)
 
-# 3. 데이터 표시 최적화 (이 부분이 핵심입니다)
+# 3. 리더보드 표시 함수 (Toss 링크 최우측 배치)
 def display_leaderboard(df):
     if df.empty:
         st.warning("조건에 맞는 종목이 없습니다.")
         return
 
-    # 컬럼 순서 재배치 (LINK를 가장 우측으로)
+    # 컬럼 순서 조정: LINK를 마지막으로
     cols = [c for c in df.columns if c != 'LINK'] + ['LINK']
     df = df[cols]
 
@@ -83,12 +92,8 @@ def display_leaderboard(df):
         use_container_width=True,
         hide_index=True,
         column_config={
-            "LINK": st.column_config.LinkColumn(
-                "LINK",
-                help="클릭하면 토스증권 상세 페이지로 이동합니다.",
-                display_text="Toss" # 표에는 Toss라고 나옵니다.
-            ),
-            "Price": st.column_config.NumberColumn("Price", format="$ %.2f"), # 명칭 고정
+            "LINK": st.column_config.LinkColumn("LINK", display_text="Toss"),
+            "Price": st.column_config.NumberColumn("Price", format="$ %.2f"),
             "Volume_USD": st.column_config.NumberColumn("거래대금($)", format="%d"),
             "Vol_Accel": st.column_config.NumberColumn("거래가속")
         }
@@ -103,7 +108,7 @@ min_val = st.sidebar.number_input("최소 거래대금 ($)", value=1000000)
 min_vol_acc = st.sidebar.slider("평균 대비 거래량", 0.5, 5.0, 1.2)
 
 # 스캔 버튼
-if st.button("🔥 나스닥 전체 실시간 스캔 시작 (내재화)"):
+if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V2 내재화)"):
     start_time = time.time()
     updated_df = run_full_market_scan()
     if not updated_df.empty:
@@ -111,10 +116,9 @@ if st.button("🔥 나스닥 전체 실시간 스캔 시작 (내재화)"):
         st.success(f"✅ 스캔 완료! ({int(time.time() - start_time)}초)")
         st.rerun()
 
-# 결과 표시
+# 결과 표시 구역
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
-    # 필터 적용
     f_df = df[(df['Volume_USD'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
     
     t1, t2 = st.tabs(["🔵 바닥반등", "🟣 상승추세"])
@@ -124,7 +128,6 @@ if os.path.exists(SAVE_FILE):
         display_leaderboard(f_df.sort_values(by="추세점수", ascending=False).head(100))
     
     if st.button("💾 이 리스트를 오늘의 TOP으로 저장"):
-        # 저장 로직 (생략 가능, 기존 파일 유지)
-        st.toast("✅ 오늘자 기록 완료!")
+        st.toast("✅ 오늘자 기록이 완료되었습니다.")
 else:
-    st.info("💡 스캔 버튼을 눌러 성적표를 만듭니다.")
+    st.info("💡 스캔 버튼을 눌러 V2 성적표 생성을 시작하세요.")
