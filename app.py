@@ -11,11 +11,12 @@ st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
 
 SAVE_FILE = "v15_analyzed.pkl"
 
-# 2. 전체 시장 스캔 함수 (블랙리스트 로직 완전 제거)
+# 2. 전체 시장 스캔 함수 (특정 종목 필터링 로직 제거)
 def run_full_market_scan():
     all_results = []
     with st.spinner("📡 나스닥(NASDAQ) 리스트 분석 중..."):
         try:
+            # 블랙리스트 없이 나스닥 전 종목 스캔
             df_nasdaq = fdr.StockListing('NASDAQ')
             tickers = df_nasdaq['Symbol'].tolist()
         except Exception as e:
@@ -37,8 +38,8 @@ def run_full_market_scan():
             last = df.iloc[-1]
             all_results.append({
                 'Ticker': t,
-                'Price_Val': float(last['Close']), # 계산용 숫자
-                '거래대금_Val': int(last['Close'] * last['Volume']), # 계산용 숫자
+                'Price': float(last['Close']), # 사용자 정보: Price
+                '거래대금': int(last['Close'] * last['Volume']),
                 'Vol_Accel': float(last['Vol_Accel']),
                 '반등점수': round(100 - float(last['RSI']), 1),
                 '추세점수': round(float(last['MFI'] * last['Vol_Accel']), 1)
@@ -51,21 +52,16 @@ def run_full_market_scan():
     progress_bar.empty()
     return pd.DataFrame(all_results)
 
-# 3. 데이터 포맷팅 및 출력 함수 (콤마 및 $ 강제 적용)
+# 3. 리더보드 출력 함수 (콤마 강제 포맷팅 적용)
 def display_formatted_df(df, score_col):
-    # 출력을 위해 데이터를 문자열로 변환 ($, 콤마 강제 삽입)
-    display_df = df.copy()
-    display_df['Price'] = display_df['Price_Val'].apply(lambda x: f"${x:,.2f}")
-    display_df['거래대금'] = display_df['거래대금_Val'].apply(lambda x: f"${x:,}")
-    
-    # 보기 좋게 열 순서 재배치
-    cols = ['Ticker', 'Price', '거래대금', 'Vol_Accel', score_col]
-    
     st.dataframe(
-        display_df[cols],
+        df,
         use_container_width=True,
         hide_index=True,
         column_config={
+            # format="$,.2f" 또는 "$,d" 형식을 사용하여 콤마 강제 노출
+            "Price": st.column_config.NumberColumn("Price", format="$,.2f"),
+            "거래대금": st.column_config.NumberColumn("거래대금", format="$,d"),
             "Vol_Accel": st.column_config.NumberColumn("거래가속", format="%.2f"),
             score_col: st.column_config.NumberColumn(score_col, format="%.1f")
         }
@@ -78,7 +74,7 @@ st.sidebar.header("🎛️ FILTER")
 min_val = st.sidebar.number_input("최소 거래대금 ($)", value=1000000)
 min_vol_acc = st.sidebar.slider("평균 대비 거래량", 0.5, 5.0, 1.2)
 
-if st.button("🔥 나스닥 실시간 스캔 시작 (V3.1)"):
+if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V3.0)"):
     start_time = time.time()
     updated_df = run_full_market_scan()
     if not updated_df.empty:
@@ -89,21 +85,18 @@ if st.button("🔥 나스닥 실시간 스캔 시작 (V3.1)"):
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
     
-    # 과거 데이터 호환용 필드 확인
-    if '거래대금_Val' not in df.columns:
-        df['거래대금_Val'] = df['거래대금'] if '거래대금' in df.columns else 0
-    if 'Price_Val' not in df.columns:
-        df['Price_Val'] = df['Price'] if 'Price' in df.columns else 0
+    # 열 이름 동기화
+    if '거래대금' not in df.columns and 'Volume_USD' in df.columns:
+        df = df.rename(columns={'Volume_USD': '거래대금'})
     
-    # 필터 적용
-    f_df = df[(df['거래대금_Val'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
+    f_df = df[(df['거래대금'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
     
     t1, t2 = st.tabs(["🔵 바닥반등", "🟣 상승추세"])
     with t1:
         p_df = f_df.sort_values(by="반등점수", ascending=False).head(100)
-        display_formatted_df(p_df, "반등점수")
+        display_formatted_df(p_df[['Ticker', 'Price', '거래대금', 'Vol_Accel', '반등점수']], "반등점수")
     with t2:
         a_df = f_df.sort_values(by="추세점수", ascending=False).head(100)
-        display_formatted_df(a_df, "추세점수")
+        display_formatted_df(a_df[['Ticker', 'Price', '거래대금', 'Vol_Accel', '추세점수']], "추세점수")
 else:
     st.info("💡 스캔 버튼을 눌러 성적표 생성을 시작하세요.")
