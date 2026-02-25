@@ -6,7 +6,7 @@ import os
 import time
 from datetime import datetime
 
-# 1. 기본 설정 (깨짐 방지 CSS 제거 버전)
+# 1. 기본 설정
 st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
 
 SAVE_FILE = "v15_analyzed.pkl"
@@ -18,8 +18,7 @@ def run_full_market_scan():
     with st.spinner("📡 나스닥(NASDAQ) 리스트 분석 중..."):
         try:
             df_nasdaq = fdr.StockListing('NASDAQ')
-            # 집중 관리 종목 제외
-            exclude = ['GAUZ', 'SLNH']
+            exclude = ['GAUZ', 'SLNH'] # 집중 관리 종목 제외
             tickers = [t for t in df_nasdaq['Symbol'].tolist() if t not in exclude]
         except Exception as e:
             st.error(f"리스트 확보 실패: {e}")
@@ -54,13 +53,14 @@ def run_full_market_scan():
     progress_bar.empty()
     return pd.DataFrame(all_results)
 
-# 3. 리더보드 출력 함수
+# 3. 리더보드 출력 함수 (콤마 출력 핵심 로직)
 def display_formatted_df(df, score_col):
     st.dataframe(
         df,
         use_container_width=True,
         hide_index=True,
         column_config={
+            # format에 %와 ,를 조합하는 대신 표준 회계 형식을 유도
             "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
             "거래대금": st.column_config.NumberColumn("거래대금", format="$%d"),
             "Vol_Accel": st.column_config.NumberColumn("거래가속", format="%.2f"),
@@ -76,24 +76,23 @@ st.sidebar.header("🎛️ FILTER")
 min_val = st.sidebar.number_input("최소 거래대금 ($)", value=1000000)
 min_vol_acc = st.sidebar.slider("평균 대비 거래량", 0.5, 5.0, 1.2)
 
-# 스캔 버튼 (에러 발생했던 들여쓰기 수정 완료)
-if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V2.8)"):
+# 스캔 버튼
+if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V2.9)"):
     start_time = time.time()
     updated_df = run_full_market_scan()
     if not updated_df.empty:
         updated_df.to_pickle(SAVE_FILE)
-        st.success(f"✅ 스캔 완료! ({int(time.time() - start_time)}초)")
+        st.success(f"✅ 스캔 완료!")
         st.rerun()
 
 # 결과 표시 구역
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
     
-    # 데이터 프레임 열 이름 동기화
+    # 열 이름 동기화
     if '거래대금' not in df.columns and 'Volume_USD' in df.columns:
         df = df.rename(columns={'Volume_USD': '거래대금'})
     
-    # 필터 적용
     f_df = df[(df['거래대금'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
     
     t1, t2 = st.tabs(["🔵 바닥반등", "🟣 상승추세"])
