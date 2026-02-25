@@ -12,7 +12,7 @@ st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
 SAVE_FILE = "v15_analyzed.pkl"
 TRACKER_FILE = "portfolio_tracker.csv"
 
-# 2. 전체 시장 스캔 함수 (블랙리스트/특정 종목 언급 없음)
+# 2. 전체 시장 스캔 함수 (블랙리스트 삭제 완료)
 def run_full_market_scan():
     all_results = []
     with st.spinner("📡 나스닥(NASDAQ) 전 종목 분석 중..."):
@@ -76,20 +76,26 @@ def record_to_history(df):
     final_df.to_csv(TRACKER_FILE, index=False)
     st.toast(f"✅ {today} 상위 종목 기록 완료!")
 
-# 4. 리더보드 출력 함수 ($ 및 콤마 강제 적용)
+# 4. 리더보드 출력 함수 (KeyError 방어 로직)
 def display_formatted_df(df, score_col):
     if df.empty:
         st.warning("🧐 조건에 맞는 종목이 없습니다.")
         return
 
     display_df = df.copy()
-    display_df['Price'] = display_df['Price_Val'].apply(lambda x: f"${x:,.2f}")
-    display_df['거래대금'] = display_df['거래대금_Val'].apply(lambda x: f"${x:,}")
     
-    target_cols = ['Ticker', 'Price', '거래대금', 'Vol_Accel', score_col, 'Toss']
+    # 출력용 문자열 변환
+    if 'Price_Val' in display_df.columns:
+        display_df['Price'] = display_df['Price_Val'].apply(lambda x: f"${x:,.2f}")
+    if '거래대금_Val' in display_df.columns:
+        display_df['거래대금'] = display_df['거래대금_Val'].apply(lambda x: f"${x:,}")
+    
+    # 실제 존재하는 열만 선택하여 KeyError 방지
+    possible_cols = ['Ticker', 'Price', '거래대금', 'Vol_Accel', score_col, 'Toss']
+    actual_cols = [c for c in possible_cols if c in display_df.columns]
     
     st.dataframe(
-        display_df[target_cols],
+        display_df[actual_cols],
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -117,7 +123,7 @@ if os.path.exists(TRACKER_FILE):
 else:
     selected_date = "선택 안 함"
 
-if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V3.6)"):
+if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V3.7)"):
     updated_df = run_full_market_scan()
     if not updated_df.empty:
         updated_df.to_pickle(SAVE_FILE)
@@ -139,22 +145,21 @@ if selected_date != "선택 안 함":
     else:
         st.table(target_picks)
 
-# 메인 결과 표시 (KeyError 방어 로직 강화)
+# 메인 결과 표시
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
     
-    # [안전 패치] 어떤 컬럼명이든 필터링용 규격으로 강제 변환
+    # 전처리를 통해 필요한 컬럼 강제 생성 (과거 데이터 호환)
     if 'Price_Val' not in df.columns:
         df['Price_Val'] = df['Price'] if 'Price' in df.columns else 0.0
-    
     if '거래대금_Val' not in df.columns:
-        # '거래대금'이 없으면 'Volume_USD'를 찾고, 그것도 없으면 0으로 처리
-        if '거래대금' in df.columns:
-            df['거래대금_Val'] = df['거래대금']
-        elif 'Volume_USD' in df.columns:
-            df['거래대금_Val'] = df['Volume_USD']
-        else:
-            df['거래대금_Val'] = 0
+        if '거래대금' in df.columns: df['거래대금_Val'] = df['거래대금']
+        elif 'Volume_USD' in df.columns: df['거래대금_Val'] = df['Volume_USD']
+        else: df['거래대금_Val'] = 0
+    if 'Toss' not in df.columns:
+        df['Toss'] = df['Ticker'].apply(lambda x: f"https://toss.im/stock-info/S/{str(x).upper()}")
+    if 'Vol_Accel' not in df.columns:
+        df['Vol_Accel'] = 0.0
 
     # 필터 적용
     f_df = df[(df['거래대금_Val'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
