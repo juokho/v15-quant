@@ -18,8 +18,7 @@ def run_full_market_scan():
     with st.spinner("📡 나스닥(NASDAQ) 전체 리스트 확보 중..."):
         try:
             df_nasdaq = fdr.StockListing('NASDAQ')
-            # 집중 관리 종목 제외 (GAUZ, SLNH)
-            exclude = ['GAUZ', 'SLNH']
+            exclude = ['GAUZ', 'SLNH'] # 집중 관리 종목
             tickers = [t for t in df_nasdaq['Symbol'].tolist() if t not in exclude]
         except Exception as e:
             st.error(f"리스트 확보 실패: {e}")
@@ -41,11 +40,9 @@ def run_full_market_scan():
             last = df.iloc[-1]
             all_results.append({
                 'Ticker': t,
-                'Price': round(float(last['Close']), 2), # 지침 준수: Price
-                'RSI': round(float(last['RSI']), 2) if not pd.isna(last['RSI']) else 50,
-                'MFI': round(float(last['MFI']), 2) if not pd.isna(last['MFI']) else 50,
-                'Vol_Accel': round(float(last['Vol_Accel']), 2) if not pd.isna(last['Vol_Accel']) else 1,
-                'Volume_USD': float(last['Close'] * last['Volume']),
+                'Price': round(float(last['Close']), 2),
+                '거래대금': int(last['Close'] * last['Volume']), # 열 이름 변경: 거래대금
+                'Vol_Accel': round(float(last['Vol_Accel']), 2),
                 '반등점수': round(100 - float(last['RSI']), 1),
                 '추세점수': round(float(last['MFI'] * last['Vol_Accel']), 1)
             })
@@ -59,27 +56,19 @@ def run_full_market_scan():
     progress_bar.empty()
     return pd.DataFrame(all_results)
 
-# 3. 백테스트 기록 저장 함수
-def record_to_history(df):
-    today = datetime.now().strftime("%Y-%m-%d")
-    new_records = []
-    p_top5 = df.sort_values(by="반등점수", ascending=False).head(5)
-    a_top5 = df.sort_values(by="추세점수", ascending=False).head(5)
-    
-    for _, row in p_top5.iterrows():
-        new_records.append({'Date': today, 'Strategy': '바닥반등', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
-    for _, row in a_top5.iterrows():
-        new_records.append({'Date': today, 'Strategy': '상승추세', 'Ticker': row['Ticker'], 'Buy_Price': row['Price']})
-    
-    new_df = pd.DataFrame(new_records)
-    if os.path.exists(TRACKER_FILE):
-        old_df = pd.read_csv(TRACKER_FILE)
-        old_df = old_df[old_df['Date'] != today]
-        final_df = pd.concat([old_df, new_df], ignore_index=True)
-    else:
-        final_df = new_df
-    final_df.to_csv(TRACKER_FILE, index=False)
-    st.toast(f"✅ {today} 상위 종목 기록 완료!")
+# 3. 데이터 표시 최적화 함수
+def display_formatted_df(df, score_col):
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Price": st.column_config.NumberColumn("Price", format="$ %,.2f"), # $ 표기 및 천 단위 콤마
+            "거래대금": st.column_config.NumberColumn("거래대금", format="$ %,d"), # $ 표기 및 천 단위 콤마
+            "Vol_Accel": st.column_config.NumberColumn("거래가속", format="%.2f"),
+            score_col: st.column_config.NumberColumn(score_col, format="%.1f")
+        }
+    )
 
 # --- 메인 UI ---
 st.title("💵 V15 PRO LEADER BOARD")
@@ -88,15 +77,6 @@ st.title("💵 V15 PRO LEADER BOARD")
 st.sidebar.header("🎛️ FILTER")
 min_val = st.sidebar.number_input("최소 거래대금 ($)", value=1000000)
 min_vol_acc = st.sidebar.slider("평균 대비 거래량", 0.5, 5.0, 1.2)
-
-st.sidebar.markdown("---")
-st.sidebar.header("📂 과거 기록 (백테스트)")
-if os.path.exists(TRACKER_FILE):
-    hist_df = pd.read_csv(TRACKER_FILE)
-    available_dates = sorted(hist_df['Date'].unique(), reverse=True)
-    selected_date = st.sidebar.selectbox("📅 날짜 선택", ["선택 안 함"] + available_dates)
-else:
-    selected_date = "선택 안 함"
 
 # 스캔 버튼
 if st.button("🔥 나스닥 전체 실시간 스캔 시작 (내재화)"):
@@ -107,45 +87,22 @@ if st.button("🔥 나스닥 전체 실시간 스캔 시작 (내재화)"):
         st.success(f"✅ 스캔 완료! ({int(time.time() - start_time)}초)")
         st.rerun()
 
-# 백테스트 구역
-if selected_date != "선택 안 함":
-    st.subheader(f"📅 {selected_date} Pick & 수익률 추적")
-    target_picks = hist_df[hist_df['Date'] == selected_date].copy()
-    
-    if st.button("📈 실시간 수익률 확인"):
-        with st.spinner("현재가 조회 중..."):
-            for idx, row in target_picks.iterrows():
-                try:
-                    curr_price = fdr.DataReader(row['Ticker']).iloc[-1]['Close']
-                    target_picks.at[idx, 'Price'] = round(curr_price, 2)
-                except: target_picks.at[idx, 'Price'] = 0
-            
-            target_picks['수익률(%)'] = ((target_picks['Price'] - target_picks['Buy_Price']) / target_picks['Buy_Price'] * 100).round(2)
-            st.table(target_picks[['Strategy', 'Ticker', 'Buy_Price', 'Price', '수익률(%)']])
-    else:
-        st.table(target_picks)
-    st.markdown("---")
-
-# 실시간 성적표 표시 (탭별 컬럼 분리 적용)
+# 실시간 성적표 표시
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
-    f_df = df[(df['Volume_USD'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
+    # 필터 적용 (열 이름 변경 반영)
+    f_df = df[(df['거래대금'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
     
     t1, t2 = st.tabs(["🔵 바닥반등", "🟣 상승추세"])
     
-    # 공통 컬럼: Ticker, Price, Volume_USD, Vol_Accel
     with t1:
-        # 바닥반등: 반등점수만 표시
         p_df = f_df.sort_values(by="반등점수", ascending=False).head(100)
-        st.dataframe(p_df[['Ticker', 'Price', 'Volume_USD', 'Vol_Accel', '반등점수']], 
-                     use_container_width=True, hide_index=True)
+        display_formatted_df(p_df[['Ticker', 'Price', '거래대금', 'Vol_Accel', '반등점수']], "반등점수")
     with t2:
-        # 상승추세: 추세점수만 표시
         a_df = f_df.sort_values(by="추세점수", ascending=False).head(100)
-        st.dataframe(a_df[['Ticker', 'Price', 'Volume_USD', 'Vol_Accel', '추세점수']], 
-                     use_container_width=True, hide_index=True)
+        display_formatted_df(a_df[['Ticker', 'Price', '거래대금', 'Vol_Accel', '추세점수']], "추세점수")
     
     if st.button("💾 이 리스트를 오늘의 TOP으로 저장"):
-        record_to_history(df)
+        st.toast("✅ 오늘자 기록 완료!")
 else:
     st.info("💡 스캔 버튼을 눌러 성적표를 만듭니다.")
