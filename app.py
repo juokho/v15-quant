@@ -10,16 +10,15 @@ from datetime import datetime
 st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
 
 SAVE_FILE = "v15_analyzed.pkl"
-TRACKER_FILE = "portfolio_tracker.csv"
 
-# 2. 내재화된 전체 시장 스캔 함수 (V2 로직)
+# 2. 전체 시장 스캔 함수 (특정 종목 필터링 로직 제거)
 def run_full_market_scan():
     all_results = []
     with st.spinner("📡 나스닥(NASDAQ) 리스트 분석 중..."):
         try:
+            # 블랙리스트 없이 나스닥 전 종목 스캔
             df_nasdaq = fdr.StockListing('NASDAQ')
-            exclude = ['GAUZ', 'SLNH'] # 집중 관리 종목 제외
-            tickers = [t for t in df_nasdaq['Symbol'].tolist() if t not in exclude]
+            tickers = df_nasdaq['Symbol'].tolist()
         except Exception as e:
             st.error(f"리스트 확보 실패: {e}")
             return pd.DataFrame()
@@ -53,16 +52,16 @@ def run_full_market_scan():
     progress_bar.empty()
     return pd.DataFrame(all_results)
 
-# 3. 리더보드 출력 함수 (콤마 출력 핵심 로직)
+# 3. 리더보드 출력 함수 (콤마 강제 포맷팅 적용)
 def display_formatted_df(df, score_col):
     st.dataframe(
         df,
         use_container_width=True,
         hide_index=True,
         column_config={
-            # format에 %와 ,를 조합하는 대신 표준 회계 형식을 유도
-            "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
-            "거래대금": st.column_config.NumberColumn("거래대금", format="$%d"),
+            # format="$,.2f" 또는 "$,d" 형식을 사용하여 콤마 강제 노출
+            "Price": st.column_config.NumberColumn("Price", format="$,.2f"),
+            "거래대금": st.column_config.NumberColumn("거래대금", format="$,d"),
             "Vol_Accel": st.column_config.NumberColumn("거래가속", format="%.2f"),
             score_col: st.column_config.NumberColumn(score_col, format="%.1f")
         }
@@ -71,13 +70,11 @@ def display_formatted_df(df, score_col):
 # --- 메인 UI ---
 st.title("💵 V15 PRO LEADER BOARD")
 
-# 사이드바 필터
 st.sidebar.header("🎛️ FILTER")
 min_val = st.sidebar.number_input("최소 거래대금 ($)", value=1000000)
 min_vol_acc = st.sidebar.slider("평균 대비 거래량", 0.5, 5.0, 1.2)
 
-# 스캔 버튼
-if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V2.9)"):
+if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V3.0)"):
     start_time = time.time()
     updated_df = run_full_market_scan()
     if not updated_df.empty:
@@ -85,7 +82,6 @@ if st.button("🔥 나스닥 전체 실시간 스캔 시작 (V2.9)"):
         st.success(f"✅ 스캔 완료!")
         st.rerun()
 
-# 결과 표시 구역
 if os.path.exists(SAVE_FILE):
     df = pd.read_pickle(SAVE_FILE)
     
