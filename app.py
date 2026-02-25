@@ -7,18 +7,20 @@ import time
 from datetime import datetime, timedelta
 
 # 1. 기본 설정
-st.set_page_config(page_title="V15 PRO QUANT", layout="wide")
+st.set_page_config(page_title="V15 PRO QUANT V3.9", layout="wide")
 
-SAVE_FILE = "v15_analyzed.pkl"
+LIVE_FILE = "v15_live.pkl"      # 오늘 자 실시간 데이터
+HIST_FILE = "v15_history.pkl"   # 과거 타임머신 데이터
 TRACKER_FILE = "portfolio_tracker.csv"
 
-# 2. 타임머신 스캔 함수 (과거 특정 날짜 기준 스캔)
-def run_historical_scan(target_date):
+# 2. 스캔 함수 (Mode에 따라 파일 분리 저장)
+def run_scan(target_date=None):
     all_results = []
-    # target_date는 datetime 객체
-    date_str = target_date.strftime('%Y-%m-%d')
+    is_live = target_date is None
+    date_str = datetime.now().strftime('%Y-%m-%d') if is_live else target_date.strftime('%Y-%m-%d')
     
-    with st.spinner(f"📡 {date_str} 기준 나스닥 데이터 분석 중..."):
+    msg = "📡 실시간 나스닥 분석 중..." if is_live else f"📡 {date_str} 기준 데이터 복구 중..."
+    with st.spinner(msg):
         try:
             df_nasdaq = fdr.StockListing('NASDAQ')
             tickers = df_nasdaq['Symbol'].tolist()
@@ -31,8 +33,8 @@ def run_historical_scan(target_date):
     
     for i, t in enumerate(tickers):
         try:
-            # 해당 날짜까지의 데이터를 가져옴
-            df = fdr.DataReader(t, end=date_str).tail(60)
+            # 타임머신일 경우 해당 날짜까지의 데이터만 가져옴
+            df = fdr.DataReader(t, end=date_str).tail(60) if not is_live else fdr.DataReader(t).tail(60)
             if len(df) < 30: continue
 
             df['RSI'] = ta.rsi(df['Close'], length=14)
@@ -42,7 +44,7 @@ def run_historical_scan(target_date):
             last = df.iloc[-1]
             all_results.append({
                 'Ticker': t,
-                'Price_Val': float(last['Close']),
+                'Price_Val': float(last['Close']), # 당시 가격
                 '거래대금_Val': int(last['Close'] * last['Volume']),
                 'Vol_Accel': float(last['Vol_Accel']),
                 '반등점수': round(100 - float(last['RSI']), 1),
@@ -55,79 +57,102 @@ def run_historical_scan(target_date):
         except: continue
             
     progress_bar.empty()
-    return pd.DataFrame(all_results)
+    res_df = pd.DataFrame(all_results)
+    if not res_df.empty:
+        save_path = LIVE_FILE if is_live else HIST_FILE
+        res_df.to_pickle(save_path)
+    return res_df
 
-# 3. 리더보드 출력 함수 (V3 포맷팅 유지)
-def display_formatted_df(df, score_col):
+# 3. 수익률 계산 함수 (과거 데이터용)
+def calculate_returns(df):
+    with st.spinner("📈 현재가 대조하여 수익률 계산 중..."):
+        returns = []
+        for _, row in df.iterrows():
+            try:
+                # 현재 시점의 최신가 한 줄 가져오기
+                current_data = fdr.DataReader(row['Ticker']).iloc[-1]
+                curr_price = float(current_data['Close'])
+                gain = ((curr_price - row['Price_Val']) / row['Price_Val']) * 100
+                returns.append({'Current_Price': curr_price, 'Return_Pct': round(gain, 2)})
+            except:
+                returns.append({'Current_Price': 0, 'Return_Pct': 0})
+        
+        return pd.concat([df.reset_index(drop=True), pd.DataFrame(returns)], axis=1)
+
+# 4. 출력 함수
+def display_board(df, score_col, is_history=False):
     if df.empty:
-        st.warning("🧐 조건에 맞는 종목이 없습니다.")
+        st.warning("🧐 데이터가 없습니다.")
         return
 
     display_df = df.copy()
-    if 'Price_Val' in display_df.columns:
-        display_df['Price'] = display_df['Price_Val'].apply(lambda x: f"${x:,.2f}")
-    if '거래대금_Val' in display_df.columns:
-        display_df['거래대금'] = display_df['거래대금_Val'].apply(lambda x: f"${x:,}")
+    display_df['Price'] = display_df['Price_Val'].apply(lambda x: f"${x:,.2f}")
+    display_df['거래대금'] = display_df['거래대금_Val'].apply(lambda x: f"${x:,}")
     
-    possible_cols = ['Ticker', 'Price', '거래대금', 'Vol_Accel', score_col, 'Toss']
-    actual_cols = [c for c in possible_cols if c in display_df.columns]
+    # 수익률이 계산된 경우 포맷팅
+    if 'Return_Pct' in display_df.columns:
+        display_df['수익률'] = display_df['Return_Pct'].apply(lambda x: f"{x:+.2f}%")
+        display_df['현재가'] = display_df['Current_Price'].apply(lambda x: f"${x:,.2f}")
+        cols = ['Ticker', 'Price', '현재가', '수익률', '거래대금', score_col, 'Toss']
+    else:
+        cols = ['Ticker', 'Price', '거래대금', 'Vol_Accel', score_col, 'Toss']
+    
+    actual_cols = [c for c in cols if c in display_df.columns]
     
     st.dataframe(
         display_df[actual_cols],
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Price": st.column_config.TextColumn("Price"),
-            "거래대금": st.column_config.TextColumn("거래대금"),
-            "Vol_Accel": st.column_config.NumberColumn("거래가속", format="%.2f"),
-            score_col: st.column_config.NumberColumn(score_col, format="%.1f"),
-            "Toss": st.column_config.LinkColumn("Toss", display_text="🚀")
+            "Toss": st.column_config.LinkColumn("Toss", display_text="🚀"),
+            "수익률": st.column_config.TextColumn("수익률") # 색상 강조 등은 텍스트로 대체
         }
     )
 
 # --- 메인 UI ---
-st.title("💵 V15 PRO LEADER BOARD (Time Machine)")
+st.title("💵 V15 PRO QUANT V3.9")
 
-# 사이드바: 타임머신 설정
-st.sidebar.header("🕒 타임머신 스캔")
-# 현재 날짜로부터 한 달 전까지 선택 가능
-max_date = datetime.now()
-min_date = max_date - timedelta(days=30)
-selected_scan_date = st.sidebar.date_input("스캔할 과거 날짜 선택", value=max_date, min_value=min_date, max_value=max_date)
-
-if st.sidebar.button("🕰️ 해당 날짜 리더보드 생성"):
-    hist_scan_result = run_historical_scan(selected_scan_date)
-    if not hist_scan_result.empty:
-        hist_scan_result.to_pickle(SAVE_FILE)
-        st.success(f"✅ {selected_scan_date} 기준 데이터 복구 완료!")
-        st.rerun()
+# 사이드바 모드 분리
+mode = st.sidebar.radio("📡 모드 선택", ["실시간 스캔", "과거 수익률 분석"])
 
 st.sidebar.markdown("---")
-st.sidebar.header("🎛️ FILTER")
 min_val = st.sidebar.number_input("최소 거래대금 ($)", value=1000000)
 min_vol_acc = st.sidebar.slider("평균 대비 거래량", 0.5, 5.0, 1.2)
 
-# 메인 결과 표시 로직 (V3 유지)
-if os.path.exists(SAVE_FILE):
-    df = pd.read_pickle(SAVE_FILE)
+if mode == "실시간 스캔":
+    st.header("🟢 Live Market Leaderboard")
+    if st.button("🔥 나스닥 실시간 스캔 시작"):
+        run_scan(None)
+        st.rerun()
     
-    # 안전 패치 (KeyError 방어)
-    if 'Price_Val' not in df.columns: df['Price_Val'] = df['Price'] if 'Price' in df.columns else 0.0
-    if '거래대금_Val' not in df.columns:
-        if '거래대금' in df.columns: df['거래대금_Val'] = df['거래대금']
-        elif 'Volume_USD' in df.columns: df['거래대금_Val'] = df['Volume_USD']
-        else: df['거래대금_Val'] = 0
-    if 'Toss' not in df.columns: df['Toss'] = df['Ticker'].apply(lambda x: f"https://toss.im/stock-info/S/{str(x).upper()}")
-    if 'Vol_Accel' not in df.columns: df['Vol_Accel'] = 0.0
+    if os.path.exists(LIVE_FILE):
+        df = pd.read_pickle(LIVE_FILE)
+        f_df = df[(df['거래대금_Val'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
+        t1, t2 = st.tabs(["🔵 바닥반등", "🟣 상승추세"])
+        with t1: display_board(f_df.sort_values('반등점수', ascending=False).head(100), '반등점수')
+        with t2: display_board(f_df.sort_values('추세점수', ascending=False).head(100), '추세점수')
 
-    f_df = df[(df['거래대금_Val'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
-    
-    t1, t2 = st.tabs(["🔵 바닥반등", "🟣 상승추세"])
-    with t1:
-        p_df = f_df.sort_values(by="반등점수", ascending=False).head(100)
-        display_formatted_df(p_df, "반등점수")
-    with t2:
-        a_df = f_df.sort_values(by="추세점수", ascending=False).head(100)
-        display_formatted_df(a_df, "추세점수")
 else:
-    st.info("💡 사이드바에서 날짜를 선택하고 '타임머신 스캔'을 시작하세요.")
+    st.header("🕒 Historical Return Analysis")
+    selected_date = st.date_input("분석할 과거 날짜", value=datetime.now() - timedelta(days=1))
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🕰️ 해당 날짜 데이터 스캔/복구"):
+            run_scan(selected_date)
+            st.rerun()
+    
+    if os.path.exists(HIST_FILE):
+        df = pd.read_pickle(HIST_FILE)
+        
+        with col2:
+            if st.button("📈 현재가 기준 수익률 계산"):
+                df_with_returns = calculate_returns(df)
+                df_with_returns.to_pickle(HIST_FILE) # 수익률 포함해서 갱신
+                st.rerun()
+
+        f_df = df[(df['거래대금_Val'] >= min_val) & (df['Vol_Accel'] >= min_vol_acc)].copy()
+        
+        t1, t2 = st.tabs(["🔵 바닥반등 결과", "🟣 상승추세 결과"])
+        with t1: display_board(f_df.sort_values('반등점수', ascending=False).head(100), '반등점수', True)
+        with t2: display_board(f_df.sort_values('추세점수', ascending=False).head(100), '추세점수', True)
